@@ -51,6 +51,9 @@ type sdkInjector struct {
 	logger logr.Logger
 }
 
+// -----------------------------------------------
+// inject - only called by Mutate in podmutator.go
+// -----------------------------------------------
 func (i *sdkInjector) inject(ctx context.Context, insts languageInstrumentations, ns corev1.Namespace, pod corev1.Pod, containerName string) corev1.Pod {
 	if len(pod.Spec.Containers) < 1 {
 		return pod
@@ -140,9 +143,19 @@ func (i *sdkInjector) inject(ctx context.Context, insts languageInstrumentations
 		pod = i.injectCommonEnvVar(otelinst, pod, index)
 		pod = i.injectCommonSDKConfig(ctx, otelinst, ns, pod, index, index)
 	}
+	existingResourceEnvIdx := getIndexOfEnv(pod.Spec.Containers[index].Env, constants.EnvOTELResourceAttrs)
+
+	if existingResourceEnvIdx > -1 {
+		if strings.Contains(pod.Spec.Containers[index].Env[existingResourceEnvIdx].Value, "service.version") {
+			panic(fmt.Sprintf("%v", pod))
+		}
+	}
 	return pod
 }
 
+// --------------------------------------------------------------------------------------------
+// injectCommonEnvVar - only called by inject in sdk.go (multiple uses)
+// --------------------------------------------------------------------------------------------
 func (i *sdkInjector) injectCommonEnvVar(otelinst v1alpha1.Instrumentation, pod corev1.Pod, index int) corev1.Pod {
 	container := &pod.Spec.Containers[index]
 	for _, env := range otelinst.Spec.Env {
@@ -161,6 +174,10 @@ func (i *sdkInjector) injectCommonEnvVar(otelinst v1alpha1.Instrumentation, pod 
 // and appIndex should be the same value.  This is true for dotnet, java, nodejs, and python instrumentations.
 // Go requires the agent to be a different container in the pod, so the agentIndex should represent this new sidecar
 // and appIndex should represent the application being instrumented.
+
+// --------------------------------------------------------------------------------------------
+// injectCommonSDKConfig - only called by inject in sdk.go (multiple uses)
+// --------------------------------------------------------------------------------------------
 func (i *sdkInjector) injectCommonSDKConfig(ctx context.Context, otelinst v1alpha1.Instrumentation, ns corev1.Namespace, pod corev1.Pod, agentIndex int, appIndex int) corev1.Pod {
 	container := &pod.Spec.Containers[agentIndex]
 	resourceMap := i.createResourceMap(ctx, otelinst, ns, pod, appIndex)
@@ -170,17 +187,6 @@ func (i *sdkInjector) injectCommonSDKConfig(ctx context.Context, otelinst v1alph
 			Name:  constants.EnvOTELServiceName,
 			Value: chooseServiceName(pod, resourceMap, appIndex),
 		})
-	}
-
-	idx = getIndexOfEnv(container.Env, constants.EnvOTELServiceVersion)
-	if idx == -1 {
-		vsn := chooseServiceVersion(pod, appIndex)
-		if vsn != "" {
-			container.Env = append(container.Env, corev1.EnvVar{
-				Name:  constants.EnvOTELServiceVersion,
-				Value: vsn,
-			})
-		}
 	}
 
 	if otelinst.Spec.Exporter.Endpoint != "" {
@@ -218,6 +224,24 @@ func (i *sdkInjector) injectCommonSDKConfig(ctx context.Context, otelinst v1alph
 			resourceMap[string(semconv.K8SPodUIDKey)] = fmt.Sprintf("$(%s)", constants.EnvPodUID)
 		}
 	}
+
+	//##########
+
+	if resourceMap[string(semconv.ServiceVersionKey)] == "" {
+		//SOMETHING HERE, MB
+		vsn := chooseServiceVersion(pod, appIndex)
+		if vsn != "" {
+			container.Env = append(container.Env, corev1.EnvVar{
+				Name:  constants.EnvServiceVersion,
+				Value: vsn,
+			})
+
+			resourceMap[string(semconv.ServiceVersionKey)] = fmt.Sprintf("$(%s)", constants.EnvServiceVersion)
+		}
+	}
+
+	//##########
+
 	if resourceMap[string(semconv.K8SNodeNameKey)] == "" {
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name: constants.EnvNodeName,
@@ -283,6 +307,10 @@ func (i *sdkInjector) injectCommonSDKConfig(ctx context.Context, otelinst v1alph
 	return pod
 }
 
+//-------------------------------------------------------------------------------------
+//getIndexOfEnv - only called by injectCommonSDKConfig, only called by inject in sdk.go
+//-------------------------------------------------------------------------------------
+
 func chooseServiceName(pod corev1.Pod, resources map[string]string, index int) string {
 	if name := resources[string(semconv.K8SDeploymentNameKey)]; name != "" {
 		return name
@@ -315,9 +343,13 @@ func chooseServiceVersion(pod corev1.Pod, index int) string {
 
 // createResourceMap creates resource attribute map.
 // User defined attributes (in explicitly set env var) have higher precedence.
+
+// -----------------------------------------------------------------------------------------
+// createResourceMap - only called by injectCommonSDKConfig, only called by inject in sdk.go
+// -----------------------------------------------------------------------------------------
 func (i *sdkInjector) createResourceMap(ctx context.Context, otelinst v1alpha1.Instrumentation, ns corev1.Namespace, pod corev1.Pod, index int) map[string]string {
 	// get existing resources env var and parse it into a map
-	existingRes := map[string]bool{}
+	existingRes := map[string]string{}
 	existingResourceEnvIdx := getIndexOfEnv(pod.Spec.Containers[index].Env, constants.EnvOTELResourceAttrs)
 	if existingResourceEnvIdx > -1 {
 		existingResArr := strings.Split(pod.Spec.Containers[index].Env[existingResourceEnvIdx].Value, ",")
@@ -326,17 +358,20 @@ func (i *sdkInjector) createResourceMap(ctx context.Context, otelinst v1alpha1.I
 			if len(keyValueArr) != 2 {
 				continue
 			}
-			existingRes[keyValueArr[0]] = true
+			existingRes[keyValueArr[0]] = keyValueArr[1]
 		}
 	}
 
 	res := map[string]string{}
 	for k, v := range otelinst.Spec.Resource.Attributes {
-		if !existingRes[k] {
+		if existingRes[k] == "" {
 			res[k] = v
 		}
 	}
 
+	if existingRes[string(semconv.ServiceVersionKey)] != "" {
+		res[string(semconv.ServiceVersionKey)] = existingRes[string(semconv.ServiceVersionKey)]
+	}
 	k8sResources := map[attribute.Key]string{}
 	k8sResources[semconv.K8SNamespaceNameKey] = ns.Name
 	k8sResources[semconv.K8SContainerNameKey] = pod.Spec.Containers[index].Name
@@ -347,13 +382,16 @@ func (i *sdkInjector) createResourceMap(ctx context.Context, otelinst v1alpha1.I
 	k8sResources[semconv.K8SNodeNameKey] = pod.Spec.NodeName
 	i.addParentResourceLabels(ctx, otelinst.Spec.Resource.AddK8sUIDAttributes, ns, pod.ObjectMeta, k8sResources)
 	for k, v := range k8sResources {
-		if !existingRes[string(k)] && v != "" {
+		if existingRes[string(k)] == "" && v != "" {
 			res[string(k)] = v
 		}
 	}
 	return res
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// addParentResourceLabels - only called by createResourceMap, only called by injectCommonSDKConfig, only called by inject in sdk.go
+// ---------------------------------------------------------------------------------------------------------------------------------
 func (i *sdkInjector) addParentResourceLabels(ctx context.Context, uid bool, ns corev1.Namespace, objectMeta metav1.ObjectMeta, resources map[attribute.Key]string) {
 	for _, owner := range objectMeta.OwnerReferences {
 		switch strings.ToLower(owner.Kind) {
@@ -410,6 +448,9 @@ func (i *sdkInjector) addParentResourceLabels(ctx context.Context, uid bool, ns 
 	}
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// resourceMapToStr - only called by createResourceMap, only called by injectCommonSDKConfig, only called by inject in sdk.go
+// ---------------------------------------------------------------------------------------------------------------------------------
 func resourceMapToStr(res map[string]string) string {
 	keys := make([]string, 0, len(res))
 	for k := range res {
@@ -428,6 +469,9 @@ func resourceMapToStr(res map[string]string) string {
 	return str
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// getIndexOfEnv - called by functions in dotnet.go, golang.go, javaagent.go, nodejs.go, python.go, sdk.go
+// ---------------------------------------------------------------------------------------------------------------------------------
 func getIndexOfEnv(envs []corev1.EnvVar, name string) int {
 	for i := range envs {
 		if envs[i].Name == name {
@@ -437,6 +481,9 @@ func getIndexOfEnv(envs []corev1.EnvVar, name string) int {
 	return -1
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// moveEnvToListEnd - only called by injectCommonSDKConfig, only called by inject in sdk.go
+// ---------------------------------------------------------------------------------------------------------------------------------
 func moveEnvToListEnd(envs []corev1.EnvVar, idx int) []corev1.EnvVar {
 	if idx >= 0 && idx < len(envs) {
 		envToMove := envs[idx]
@@ -447,6 +494,9 @@ func moveEnvToListEnd(envs []corev1.EnvVar, idx int) []corev1.EnvVar {
 	return envs
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// validateContainerEnv - called by functions in dotnet.go, javaagent.go, nodejs.go, python.go
+// ---------------------------------------------------------------------------------------------------------------------------------
 func validateContainerEnv(envs []corev1.EnvVar, envsToBeValidated ...string) error {
 	for _, envToBeValidated := range envsToBeValidated {
 		for _, containerEnv := range envs {
