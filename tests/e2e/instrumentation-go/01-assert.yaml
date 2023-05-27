@@ -37,7 +37,7 @@ spec:
           value: "true"
         - name: OTEL_SERVICE_NAME
           value: my-deployment-with-sidecar
-        - name: OTEL_SERVICE_VERSION
+        - name: OTEL_RESOURCE_ATTRIBUTES_SERVICE_VERSION
           value: 1.3.1-productcatalogservice
         - name: OTEL_RESOURCE_ATTRIBUTES_POD_NAME
         - name: OTEL_RESOURCE_ATTRIBUTES_NODE_NAME
