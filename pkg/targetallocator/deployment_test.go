@@ -24,6 +24,8 @@ import (
 	"github.com/open-telemetry/opentelemetry-operator/internal/config"
 )
 
+// TestDeploymentNewDefault checks if the default deployment has the expected name, labels, and containers,
+// and that it doesn't include any unexpected annotations.
 func TestDeploymentNewDefault(t *testing.T) {
 	// prepare
 	otelcol := v1alpha1.OpenTelemetryCollector{
@@ -39,7 +41,6 @@ func TestDeploymentNewDefault(t *testing.T) {
 	// verify
 	assert.Equal(t, "my-instance-targetallocator", d.Name)
 	assert.Equal(t, "my-instance-targetallocator", d.Labels["app.kubernetes.io/name"])
-
 	assert.Len(t, d.Spec.Template.Spec.Containers, 1)
 
 	// none of the default annotations should propagate down to the pod
@@ -49,6 +50,7 @@ func TestDeploymentNewDefault(t *testing.T) {
 	assert.Equal(t, d.Spec.Template.Labels, d.Spec.Selector.MatchLabels)
 }
 
+// TestDeploymentPodAnnotations verifies that any custom annotations are correctly applied to the deployment.
 func TestDeploymentPodAnnotations(t *testing.T) {
 	// prepare
 	testPodAnnotationValues := map[string]string{"annotation-key": "annotation-value"}
@@ -68,4 +70,28 @@ func TestDeploymentPodAnnotations(t *testing.T) {
 	// verify
 	assert.Equal(t, "my-instance-targetallocator", ds.Name)
 	assert.Equal(t, testPodAnnotationValues, ds.Spec.Template.Annotations)
+}
+
+// TestDeploymentVolume checks if the deployment has the expected volume configurations.
+func TestDeploymentVolume(t *testing.T) {
+	// prepare
+	otelcol := v1alpha1.OpenTelemetryCollector{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-instance",
+		},
+	}
+	cfg := config.New()
+
+	// test
+	d := Deployment(cfg, logger, otelcol)
+
+	// verify the presence of volume in deployment
+	volumes := d.Spec.Template.Spec.Volumes
+	assert.Len(t, volumes, 1)
+
+	// verify the volume properties
+	volume := volumes[0]
+	assert.Equal(t, cfg.TargetAllocatorConfigMapEntry(), volume.Name)
+	assert.NotNil(t, volume.ConfigMap)
+	assert.Equal(t, cfg.TargetAllocatorConfigMapEntry(), volume.ConfigMap.Name)
 }

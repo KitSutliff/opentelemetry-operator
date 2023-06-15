@@ -24,6 +24,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-operator/pkg/collector/adapters"
 )
 
+// Utility functions for generating error messages for specific components
 func errorNoComponent(component string) error {
 	return fmt.Errorf("no %s available as part of the configuration", component)
 }

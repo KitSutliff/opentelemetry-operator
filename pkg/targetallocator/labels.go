@@ -19,24 +19,38 @@ import (
 	"github.com/open-telemetry/opentelemetry-operator/pkg/naming"
 )
 
-// Labels return the common labels to all TargetAllocator objects that are part of a managed OpenTelemetryCollector.
+// Labels function returns a map with labels common to all TargetAllocator objects that are part of a managed OpenTelemetryCollector.
 func Labels(instance v1alpha1.OpenTelemetryCollector, name string) map[string]string {
-	// new map every time, so that we don't touch the instance's label
+
+    // A new map is created to avoid modifying the instance's labels.
 	base := map[string]string{}
+	
+	// If the instance has any labels, they are copied to the new map.
 	if nil != instance.Labels {
 		for k, v := range instance.Labels {
 			base[k] = v
 		}
 	}
 
+	// The following labels are added to the map:
+
+    // This label indicates that the object is managed by the OpenTelemetry operator.
 	base["app.kubernetes.io/managed-by"] = "opentelemetry-operator"
+	
+    // This label is a unique identifier for the object, created by combining the instance's namespace and name.
 	base["app.kubernetes.io/instance"] = naming.Truncate("%s.%s", 63, instance.Namespace, instance.Name)
+	
+    // This label indicates that the object is part of the OpenTelemetry ecosystem.
 	base["app.kubernetes.io/part-of"] = "opentelemetry"
+	
+    // This label indicates that the object is an OpenTelemetry target allocator.
 	base["app.kubernetes.io/component"] = "opentelemetry-targetallocator"
 
+	// If the "app.kubernetes.io/name" label is not set, the name argument is used as its value.
 	if _, ok := base["app.kubernetes.io/name"]; !ok {
 		base["app.kubernetes.io/name"] = name
 	}
 
+	// The function returns the map with the labels.
 	return base
 }
