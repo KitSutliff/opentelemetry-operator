@@ -15,7 +15,12 @@
 package instrumentation
 
 import (
+	"context"
+
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/open-telemetry/opentelemetry-operator/apis/v1alpha1"
 )
@@ -24,6 +29,12 @@ const (
 	envJavaToolsOptions = "JAVA_TOOL_OPTIONS"
 	javaJVMArgument     = " -javaagent:/otel-auto-instrumentation/javaagent.jar"
 )
+
+//add the following to the operator
+
+// 1) When the operator receives a pod we will check for config maps that reference the given pod
+// 2) If a config map is present operator will look for JAVA_TOOL_OPTS env var
+// 3) I there is a JAVA_TOOL_OPTS env var in the ConfigMap, that will be used to populate the JAVA_TOOL_OPTS env var in the container
 
 func injectJavaagent(javaSpec v1alpha1.Java, pod corev1.Pod, index int) (corev1.Pod, error) {
 	// caller checks if there is at least one container.
@@ -40,6 +51,30 @@ func injectJavaagent(javaSpec v1alpha1.Java, pod corev1.Pod, index int) (corev1.
 		if idx == -1 {
 			container.Env = append(container.Env, env)
 		}
+	}
+	//##############################################################################################################
+	idx := getIndexOfEnvFrom(container.EnvFrom, envJavaToolsOptions)
+	if idx != -1 {
+		name := container.EnvFrom[idx].ConfigMapRef.Marshal()
+		config, err := rest.InClusterConfig()
+		if err != nil {
+			panic(err.Error())
+		}
+		// creates the clientset
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			panic(err.Error())
+		}
+
+		// Check for config maps that reference the given pod
+		configMap, err := clientset.CoreV1().ConfigMaps(pod.Namespace).Get(context.TODO(), name, v1.GetOptions{})
+		if err != nil {
+			return pod, err
+		}
+
+		container.Env[idx].Value = configMap.Data[] +javaJVMArgument
+	} else {
+
 	}
 
 	idx := getIndexOfEnv(container.Env, envJavaToolsOptions)
