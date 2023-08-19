@@ -24,14 +24,10 @@ import (
 	"strings"
 	"time"
 
-	routev1 "github.com/openshift/api/route/v1"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	"github.com/spf13/pflag"
 	colfeaturegate "go.opentelemetry.io/collector/featuregate"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/tools/record"
 	k8sapiflag "k8s.io/component-base/cli/flag"
@@ -50,6 +46,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-operator/internal/version"
 	"github.com/open-telemetry/opentelemetry-operator/internal/webhookhandler"
 	"github.com/open-telemetry/opentelemetry-operator/pkg/autodetect"
+	"github.com/open-telemetry/opentelemetry-operator/pkg/cmd"
 	collectorupgrade "github.com/open-telemetry/opentelemetry-operator/pkg/collector/upgrade"
 	"github.com/open-telemetry/opentelemetry-operator/pkg/featuregate"
 	"github.com/open-telemetry/opentelemetry-operator/pkg/instrumentation"
@@ -63,91 +60,41 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-type tlsConfig struct {
-	minVersion   string
-	cipherSuites []string
-}
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(otelv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(routev1.AddToScheme(scheme))
-	utilruntime.Must(monitoringv1.AddToScheme(scheme))
-	// +kubebuilder:scaffold:scheme
-}
-
 func main() {
 	// registers any flags that underlying libraries might use
 	opts := zap.Options{}
 	flagset := featuregate.Flags(colfeaturegate.GlobalRegistry())
 	opts.BindFlags(flag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-	pflag.CommandLine.AddGoFlagSet(flagset)
 
 	v := version.Get()
-
-	// add flags related to this operator
-	var (
-		metricsAddr                    string
-		probeAddr                      string
-		pprofAddr                      string
-		enableLeaderElection           bool
-		collectorImage                 string
-		targetAllocatorImage           string
-		operatorOpAMPBridgeImage       string
-		autoInstrumentationJava        string
-		autoInstrumentationNodeJS      string
-		autoInstrumentationPython      string
-		autoInstrumentationDotNet      string
-		autoInstrumentationApacheHttpd string
-		autoInstrumentationGo          string
-		labelsFilter                   []string
-		webhookPort                    int
-		tlsOpt                         tlsConfig
-	)
-
-	pflag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
-	pflag.StringVar(&probeAddr, "health-probe-addr", ":8081", "The address the probe endpoint binds to.")
-	pflag.StringVar(&pprofAddr, "pprof-addr", "", "The address to expose the pprof server. Default is empty string which disables the pprof server.")
-	pflag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
-	pflag.StringVar(&collectorImage, "collector-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:%s", v.OpenTelemetryCollector), "The default OpenTelemetry collector image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&targetAllocatorImage, "target-allocator-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:%s", v.TargetAllocator), "The default OpenTelemetry target allocator image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&operatorOpAMPBridgeImage, "operator-opamp-bridge-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/operator-opamp-bridge:%s", v.OperatorOpAMPBridge), "The default OpenTelemetry Operator OpAMP Bridge image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationJava, "auto-instrumentation-java-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:%s", v.AutoInstrumentationJava), "The default OpenTelemetry Java instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationNodeJS, "auto-instrumentation-nodejs-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:%s", v.AutoInstrumentationNodeJS), "The default OpenTelemetry NodeJS instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationPython, "auto-instrumentation-python-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:%s", v.AutoInstrumentationPython), "The default OpenTelemetry Python instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationDotNet, "auto-instrumentation-dotnet-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:%s", v.AutoInstrumentationDotNet), "The default OpenTelemetry DotNet instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationGo, "auto-instrumentation-go-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-go-instrumentation/autoinstrumentation-go:%s", v.AutoInstrumentationGo), "The default OpenTelemetry Go instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringVar(&autoInstrumentationApacheHttpd, "auto-instrumentation-apache-httpd-image", fmt.Sprintf("ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-apache-httpd:%s", v.AutoInstrumentationApacheHttpd), "The default OpenTelemetry Apache HTTPD instrumentation image. This image is used when no image is specified in the CustomResource.")
-	pflag.StringArrayVar(&labelsFilter, "labels", []string{}, "Labels to filter away from propagating onto deploys")
-	pflag.IntVar(&webhookPort, "webhook-port", 9443, "The port the webhook endpoint binds to.")
-	pflag.StringVar(&tlsOpt.minVersion, "tls-min-version", "VersionTLS12", "Minimum TLS version supported. Value must match version names from https://golang.org/pkg/crypto/tls/#pkg-constants.")
-	pflag.StringSliceVar(&tlsOpt.cipherSuites, "tls-cipher-suites", nil, "Comma-separated list of cipher suites for the server. Values are from tls package constants (https://golang.org/pkg/crypto/tls/#pkg-constants). If omitted, the default Go cipher suites will be used")
-	pflag.Parse()
 
 	logger := zap.New(zap.UseFlagOptions(&opts))
 	ctrl.SetLogger(logger)
 
+	rootCmd := cmd.NewRootCommand()
+
+	rootCmd.SetArgs(flag.Args())
+
+	rootCmdConfig := rootCmd.Context().Value(cmd.RootConfigKey{}).(cmd.RootConfig)
+	ctrlConfig := rootCmdConfig.CtrlConfig
+
 	logger.Info("Starting the OpenTelemetry Operator",
 		"opentelemetry-operator", v.Operator,
-		"opentelemetry-collector", collectorImage,
-		"opentelemetry-targetallocator", targetAllocatorImage,
-		"operator-opamp-bridge", operatorOpAMPBridgeImage,
-		"auto-instrumentation-java", autoInstrumentationJava,
-		"auto-instrumentation-nodejs", autoInstrumentationNodeJS,
-		"auto-instrumentation-python", autoInstrumentationPython,
-		"auto-instrumentation-dotnet", autoInstrumentationDotNet,
-		"auto-instrumentation-go", autoInstrumentationGo,
-		"auto-instrumentation-apache-httpd", autoInstrumentationApacheHttpd,
+		"opentelemetry-collector", ctrlConfig.CollectorImage,
+		"opentelemetry-targetallocator", ctrlConfig.TargetAllocatorImage,
+		"operator-opamp-bridge", ctrlConfig.OperatorOpAMPBridgeImage,
+		"auto-instrumentation-java", ctrlConfig.AutoInstrumentationJava,
+		"auto-instrumentation-nodejs", ctrlConfig.AutoInstrumentationNodeJS,
+		"auto-instrumentation-python", ctrlConfig.AutoInstrumentationPython,
+		"auto-instrumentation-dotnet", ctrlConfig.AutoInstrumentationDotNet,
+		"auto-instrumentation-go", ctrlConfig.AutoInstrumentationGo,
+		"auto-instrumentation-apache-httpd", ctrlConfig.AutoInstrumentationApacheHttpd,
 		"feature-gates", flagset.Lookup(featuregate.FeatureGatesFlag).Value.String(),
 		"build-date", v.BuildDate,
 		"go-version", v.Go,
 		"go-arch", runtime.GOARCH,
 		"go-os", runtime.GOOS,
-		"labels-filter", labelsFilter,
+		"labels-filter", ctrlConfig.LabelsFilter,
 	)
 
 	restConfig := ctrl.GetConfigOrDie()
@@ -162,17 +109,17 @@ func main() {
 	cfg := config.New(
 		config.WithLogger(ctrl.Log.WithName("config")),
 		config.WithVersion(v),
-		config.WithCollectorImage(collectorImage),
-		config.WithTargetAllocatorImage(targetAllocatorImage),
-		config.WithOperatorOpAMPBridgeImage(operatorOpAMPBridgeImage),
-		config.WithAutoInstrumentationJavaImage(autoInstrumentationJava),
-		config.WithAutoInstrumentationNodeJSImage(autoInstrumentationNodeJS),
-		config.WithAutoInstrumentationPythonImage(autoInstrumentationPython),
-		config.WithAutoInstrumentationDotNetImage(autoInstrumentationDotNet),
-		config.WithAutoInstrumentationGoImage(autoInstrumentationGo),
-		config.WithAutoInstrumentationApacheHttpdImage(autoInstrumentationApacheHttpd),
+		config.WithCollectorImage(ctrlConfig.CollectorImage),
+		config.WithTargetAllocatorImage(ctrlConfig.TargetAllocatorImage),
+		config.WithOperatorOpAMPBridgeImage(ctrlConfig.OperatorOpAMPBridgeImage),
+		config.WithAutoInstrumentationJavaImage(ctrlConfig.AutoInstrumentationJava),
+		config.WithAutoInstrumentationNodeJSImage(ctrlConfig.AutoInstrumentationNodeJS),
+		config.WithAutoInstrumentationPythonImage(ctrlConfig.AutoInstrumentationPython),
+		config.WithAutoInstrumentationDotNetImage(ctrlConfig.AutoInstrumentationDotNet),
+		config.WithAutoInstrumentationGoImage(ctrlConfig.AutoInstrumentationGo),
+		config.WithAutoInstrumentationApacheHttpdImage(ctrlConfig.AutoInstrumentationApacheHttpd),
 		config.WithAutoDetect(ad),
-		config.WithLabelFilters(labelsFilter),
+		config.WithLabelFilters(ctrlConfig.LabelsFilter),
 	)
 
 	watchNamespace, found := os.LookupEnv("WATCH_NAMESPACE")
@@ -188,7 +135,7 @@ func main() {
 	retryPeriod := time.Second * 26
 
 	optionsTlSOptsFuncs := []func(*tls.Config){
-		func(config *tls.Config) { tlsConfigSetting(config, tlsOpt) },
+		func(config *tls.Config) { tlsConfigSetting(config, ctrlConfig.TlsOpt) },
 	}
 	var namespaces map[string]cache.Config
 	if strings.Contains(watchNamespace, ",") {
@@ -198,20 +145,21 @@ func main() {
 		}
 	}
 
+	//validates manager options
 	mgrOptions := ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
-			BindAddress: metricsAddr,
+			BindAddress: ctrlConfig.MetricsAddr,
 		},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
+		HealthProbeBindAddress: ctrlConfig.ProbeAddr,
+		LeaderElection:         ctrlConfig.EnableLeaderElection,
 		LeaderElectionID:       "9f7554c3.opentelemetry.io",
 		LeaseDuration:          &leaseDuration,
 		RenewDeadline:          &renewDeadline,
 		RetryPeriod:            &retryPeriod,
-		PprofBindAddress:       pprofAddr,
+		PprofBindAddress:       ctrlConfig.PprofAddr,
 		WebhookServer: webhook.NewServer(webhook.Options{
-			Port:    webhookPort,
+			Port:    ctrlConfig.WebhookPort,
 			TLSOpts: optionsTlSOptsFuncs,
 		}),
 		Cache: cache.Options{
@@ -251,12 +199,12 @@ func main() {
 		if err = (&otelv1alpha1.Instrumentation{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationJava:        autoInstrumentationJava,
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationNodeJS:      autoInstrumentationNodeJS,
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationPython:      autoInstrumentationPython,
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationDotNet:      autoInstrumentationDotNet,
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationGo:          autoInstrumentationGo,
-					otelv1alpha1.AnnotationDefaultAutoInstrumentationApacheHttpd: autoInstrumentationApacheHttpd,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationJava:        ctrlConfig.AutoInstrumentationJava,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationNodeJS:      ctrlConfig.AutoInstrumentationNodeJS,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationPython:      ctrlConfig.AutoInstrumentationPython,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationDotNet:      ctrlConfig.AutoInstrumentationDotNet,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationGo:          ctrlConfig.AutoInstrumentationGo,
+					otelv1alpha1.AnnotationDefaultAutoInstrumentationApacheHttpd: ctrlConfig.AutoInstrumentationApacheHttpd,
 				},
 			},
 		}).SetupWebhookWithManager(mgr); err != nil {
@@ -338,16 +286,16 @@ func addDependencies(_ context.Context, mgr ctrl.Manager, cfg config.Config, v v
 // This function get the option from command argument (tlsConfig), check the validity through k8sapiflag
 // and set the config for webhook server.
 // refer to https://pkg.go.dev/k8s.io/component-base/cli/flag
-func tlsConfigSetting(cfg *tls.Config, tlsOpt tlsConfig) {
+func tlsConfigSetting(cfg *tls.Config, tlsOpt otelv1alpha1.TlsConfig) {
 	// TLSVersion helper function returns the TLS Version ID for the version name passed.
-	tlsVersion, err := k8sapiflag.TLSVersion(tlsOpt.minVersion)
+	tlsVersion, err := k8sapiflag.TLSVersion(tlsOpt.MinVersion)
 	if err != nil {
 		setupLog.Error(err, "TLS version invalid")
 	}
 	cfg.MinVersion = tlsVersion
 
 	// TLSCipherSuites helper function returns a list of cipher suite IDs from the cipher suite names passed.
-	cipherSuiteIDs, err := k8sapiflag.TLSCipherSuites(tlsOpt.cipherSuites)
+	cipherSuiteIDs, err := k8sapiflag.TLSCipherSuites(tlsOpt.CipherSuites)
 	if err != nil {
 		setupLog.Error(err, "Failed to convert TLS cipher suite name to ID")
 	}
