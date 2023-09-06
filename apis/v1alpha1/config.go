@@ -64,6 +64,9 @@ type ProjectConfig struct {
 
 	// Minimum TLS version supported. Value must match version names from https://golang.org/pkg/crypto/tls/#pkg-constants
 	TlsOpt TlsConfig `json:"tlsOpt,omitempty"`
+
+	// The log level for the operator
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 func (p *ProjectConfig) Complete() (v1alpha1.ControllerManagerConfigurationSpec, error) {

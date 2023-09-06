@@ -25,6 +25,7 @@ import (
 	"time"
 
 	colfeaturegate "go.opentelemetry.io/collector/featuregate"
+	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -62,21 +63,36 @@ var (
 
 func main() {
 	// registers any flags that underlying libraries might use
-	opts := zap.Options{}
-	flagset := featuregate.Flags(colfeaturegate.GlobalRegistry())
-	opts.BindFlags(flag.CommandLine)
-
-	v := version.Get()
-
-	logger := zap.New(zap.UseFlagOptions(&opts))
-	ctrl.SetLogger(logger)
 
 	rootCmd := cmd.NewRootCommand()
-
 	rootCmd.SetArgs(flag.Args())
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 
 	rootCmdConfig := rootCmd.Context().Value(cmd.RootConfigKey{}).(cmd.RootConfig)
 	ctrlConfig := rootCmdConfig.CtrlConfig
+	flagset := featuregate.Flags(colfeaturegate.GlobalRegistry())
+	v := version.Get()
+
+	// maybe run e2e testing
+	// run with flags
+	//run with config file
+
+	level, err := zapcore.ParseLevel(ctrlConfig.LogLevel)
+	if err != nil {
+		os.Exit(2)
+	}
+	option := zap.Options{
+		Encoder: zapcore.NewConsoleEncoder(zapcore.EncoderConfig{}),
+		Level:   level,
+	}
+
+	logger := zap.New(zap.UseFlagOptions(&option))
+
+	logger.Error(nil, "here one")
+	ctrl.SetLogger(logger)
 
 	logger.Info("Starting the OpenTelemetry Operator",
 		"opentelemetry-operator", v.Operator,
