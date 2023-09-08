@@ -71,14 +71,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// returns nil at an inappropriate time
 	rootCmdConfig := rootCmd.Context().Value(cmd.RootConfigKey{}).(cmd.RootConfig)
 	ctrlConfig := rootCmdConfig.CtrlConfig
 	flagset := featuregate.Flags(colfeaturegate.GlobalRegistry())
 	v := version.Get()
-
-	// maybe run e2e testing
-	// run with flags
-	//run with config file
 
 	level, err := zapcore.ParseLevel(ctrlConfig.LogLevel)
 	if err != nil {

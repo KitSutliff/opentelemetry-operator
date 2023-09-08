@@ -72,6 +72,7 @@ func readConfig(cmd *cobra.Command, configFile string, v version.Version) error 
 		}
 	}
 
+	// this is not printing
 	ctx := context.WithValue(cmd.Context(), RootConfigKey{}, RootConfig{options, ctrlConfig})
 	fmt.Printf("ctx: %v", ctx)
 	cmd.SetContext(ctx)
@@ -85,10 +86,9 @@ func NewRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:          "opentelemetry-operator",
 		SilenceUsage: true,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			return readConfig(cmd, configFile, version.Get())
-		},
 	}
+	rootCmd.SetContext(context.Background())
+	readConfig(rootCmd, configFile, version.Get())
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "",
 		"The controller will load its initial configuration from this file. "+
 			"Omit this flag to use the default configuration values. "+
