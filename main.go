@@ -71,7 +71,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// returns nil at an inappropriate time
 	rootCmdConfig := rootCmd.Context().Value(cmd.RootConfigKey{}).(cmd.RootConfig)
 	ctrlConfig := rootCmdConfig.CtrlConfig
 	flagset := featuregate.Flags(colfeaturegate.GlobalRegistry())
@@ -116,7 +115,7 @@ func main() {
 	ad, err := autodetect.New(restConfig)
 	if err != nil {
 		setupLog.Error(err, "failed to setup auto-detect routine")
-		os.Exit(1)
+		os.Exit(3)
 	}
 
 	cfg := config.New(
@@ -183,14 +182,14 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
+		os.Exit(4)
 	}
 
 	ctx := ctrl.SetupSignalHandler()
 	err = addDependencies(ctx, mgr, cfg, v)
 	if err != nil {
 		setupLog.Error(err, "failed to add/run bootstrap dependencies to the controller manager")
-		os.Exit(1)
+		os.Exit(5)
 	}
 
 	if err = controllers.NewReconciler(controllers.Params{
@@ -201,13 +200,16 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("opentelemetry-operator"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OpenTelemetryCollector")
-		os.Exit(1)
+		os.Exit(6)
 	}
+
+	// The above shit is failing becasue k8s is not running locally and so there is no controller
+	// Test against kind maybe
 
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
 		if err = (&otelv1alpha1.OpenTelemetryCollector{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "OpenTelemetryCollector")
-			os.Exit(1)
+			os.Exit(7)
 		}
 		if err = (&otelv1alpha1.Instrumentation{
 			ObjectMeta: metav1.ObjectMeta{
@@ -222,7 +224,7 @@ func main() {
 			},
 		}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Instrumentation")
-			os.Exit(1)
+			os.Exit(8)
 		}
 		decoder := admission.NewDecoder(mgr.GetScheme())
 		mgr.GetWebhookServer().Register("/mutate-v1-pod", &webhook.Admission{
@@ -239,17 +241,17 @@ func main() {
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+		os.Exit(9)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
+		os.Exit(10)
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
-		os.Exit(1)
+		os.Exit(11)
 	}
 }
 

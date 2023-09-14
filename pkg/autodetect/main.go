@@ -17,6 +17,7 @@ package autodetect
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 
 	"k8s.io/client-go/discovery"
@@ -63,6 +64,7 @@ func New(restConfig *rest.Config) (AutoDetect, error) {
 // OpenShiftRoutesAvailability checks if OpenShift Route are available.
 func (a *autoDetect) OpenShiftRoutesAvailability() (OpenShiftRoutesAvailability, error) {
 	apiList, err := a.dcl.ServerGroups()
+	fmt.Println("openshift being wonky before error")
 	if err != nil {
 		return OpenShiftRoutesNotAvailable, err
 	}

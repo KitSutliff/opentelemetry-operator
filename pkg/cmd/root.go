@@ -72,7 +72,7 @@ func readConfig(cmd *cobra.Command, configFile string, v version.Version) error 
 		}
 	}
 
-	// this is not printing
+	// this is now printing :)
 	ctx := context.WithValue(cmd.Context(), RootConfigKey{}, RootConfig{options, ctrlConfig})
 	fmt.Printf("ctx: %v", ctx)
 	cmd.SetContext(ctx)

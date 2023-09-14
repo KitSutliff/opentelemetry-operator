@@ -16,6 +16,7 @@
 package config
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -116,6 +117,7 @@ func (c *Config) AutoDetect() error {
 	c.logger.V(2).Info("auto-detecting the configuration based on the environment")
 
 	ora, err := c.autoDetect.OpenShiftRoutesAvailability()
+	fmt.Println("autodetect being wonky before error")
 	if err != nil {
 		return err
 	}
@@ -129,6 +131,7 @@ func (c *Config) AutoDetect() error {
 		}
 	}
 
+	fmt.Println("autodetect being wonky before error 2")
 	hpaV, err := c.autoDetect.HPAVersion()
 	if err != nil {
 		return err

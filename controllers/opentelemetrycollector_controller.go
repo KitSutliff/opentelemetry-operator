@@ -253,6 +253,7 @@ func (r *OpenTelemetryCollectorReconciler) RunTasks(ctx context.Context, params 
 // SetupWithManager tells the manager what our controller is interested in.
 func (r *OpenTelemetryCollectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	err := r.config.AutoDetect() // We need to call this so we can get the correct autodetect version
+	fmt.Println("reconciler being wonky before error section")
 	if err != nil {
 		return err
 	}
@@ -275,6 +276,6 @@ func (r *OpenTelemetryCollectorReconciler) SetupWithManager(mgr ctrl.Manager) er
 	} else {
 		builder = builder.Owns(&autoscalingv2beta2.HorizontalPodAutoscaler{})
 	}
-
+	fmt.Println("reconciler being wonky")
 	return builder.Complete(r)
 }
